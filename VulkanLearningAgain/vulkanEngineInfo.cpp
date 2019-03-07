@@ -58,6 +58,33 @@ void printInstanceCapabilities(void)
 		delete[] extensionProperties;
 	}
 
+
+	// Get what extensions are available.
+	uint32_t numInstanceLayerExtensions;
+	HANDLE_VK(vkEnumerateInstanceExtensionProperties("",
+			&numInstanceLayerExtensions, nullptr),
+		"Querying number of Vulkan instance extensions");
+	VkExtensionProperties *extensionProperties = numInstanceLayerExtensions ?
+		new VkExtensionProperties[numInstanceLayerExtensions] : nullptr;
+	if (extensionProperties)
+	{
+		HANDLE_VK(vkEnumerateInstanceExtensionProperties("",
+				&numInstanceLayerExtensions,
+				extensionProperties),
+			"Querying Vulkan instance layer properties (layer: %s)",
+			"");
+	}
+
+	printf("Num Extensions for instance level: %u\n", numInstanceLayerExtensions);
+	for (uint32_t j = 0; j < numInstanceLayerExtensions; j++)
+	{
+		printf("\t%s : %u.%u.%u\n",
+			extensionProperties[j].extensionName,
+			VK_VERSION_MAJOR(extensionProperties[j].specVersion),
+			VK_VERSION_MINOR(extensionProperties[j].specVersion),
+			VK_VERSION_PATCH(extensionProperties[j].specVersion));
+	}
+
 	printf("\n");
 }
 
@@ -258,6 +285,8 @@ void printPhysicalDeviceDetails(uint32_t numPhysicalDevices, VkPhysicalDevice * 
 					printf(" Sparse-Binding");
 				if (queueFamilyProperties[j].queueFlags & VK_QUEUE_PROTECTED_BIT)
 					printf(" Protected");
+				if (vkGetPhysicalDeviceWin32PresentationSupportKHR(physicalDevices[i], j) == VK_TRUE)
+					printf(" Present-Win32");
 				printf("\n\t\t\tQueue Count: %u\n", queueFamilyProperties[j].queueCount);
 				printf("\t\t\tTimestamp Valid Bits: %u\n", queueFamilyProperties[j].timestampValidBits);
 				printf("\t\t\tMin Image Transfer Granularity: [ %u, %u, %u ]\n",
@@ -308,11 +337,37 @@ void printPhysicalDeviceDetails(uint32_t numPhysicalDevices, VkPhysicalDevice * 
 						for (uint32_t k = 0; k < numExt; k++)
 						{
 							printf("\t\t\t\tExtension: %s : %u.%u.%u\n",
-								exts[j].extensionName,
-								VK_VERSION_MAJOR(exts[j].specVersion),
-								VK_VERSION_MINOR(exts[j].specVersion),
-								VK_VERSION_PATCH(exts[j].specVersion));
+								exts[k].extensionName,
+								VK_VERSION_MAJOR(exts[k].specVersion),
+								VK_VERSION_MINOR(exts[k].specVersion),
+								VK_VERSION_PATCH(exts[k].specVersion));
 						}
+					}
+				}
+
+				// Get the extensions for the overall device.
+				uint32_t numExt;
+				HANDLE_VK(vkEnumerateDeviceExtensionProperties(physicalDevices[i],
+						"", &numExt, nullptr),
+					"Querying for number of extensions of layer \"%s\" on physical device %u\n",
+					"",
+					i);
+				VkExtensionProperties *exts = numExt ? new VkExtensionProperties[numExt] : nullptr;
+				if (exts)
+				{
+					HANDLE_VK(vkEnumerateDeviceExtensionProperties(physicalDevices[i],
+							"", &numExt, exts),
+						"Querying for number of extensions of layer \"%s\" on physical device %u\n",
+						"", i);
+
+					printf("\t\tNum Device Extensions: %u\n", numExt);
+					for (uint32_t k = 0; k < numExt; k++)
+					{
+						printf("\t\t\tExtension: %s : %u.%u.%u\n",
+							exts[k].extensionName,
+							VK_VERSION_MAJOR(exts[k].specVersion),
+							VK_VERSION_MINOR(exts[k].specVersion),
+							VK_VERSION_PATCH(exts[k].specVersion));
 					}
 				}
 			}

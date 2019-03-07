@@ -71,6 +71,10 @@ void VulkanEngine::init(void)
 		VK_MAKE_VERSION(1,1,0), // Vulkan API version
 	};
 
+	const char *enabledExtensionNames[] = {
+		"VK_KHR_surface",
+		"VK_KHR_win32_surface"
+	};
 	VkInstanceCreateInfo instanceCreateInfo = {
 		VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 		nullptr, // pNext - TODO: Should check out the options here.
@@ -78,8 +82,8 @@ void VulkanEngine::init(void)
 		&applicationInfo,
 		0, // Number of enabled layers
 		nullptr, // Enabled layer names
-		0, // Number of enabled extensions
-		nullptr  // Enabled extension names
+		2, // Number of enabled extensions
+		enabledExtensionNames  // Enabled extension names
 	};
 
 	HANDLE_VK(vkCreateInstance(&instanceCreateInfo, nullptr, &instance), "Creating Vulkan instance");
