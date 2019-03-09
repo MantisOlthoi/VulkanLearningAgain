@@ -16,6 +16,10 @@ class VulkanEngine
 	std::vector<VkDevice> devices;
 	std::vector<VkCommandPool> commandPools; // One per device.
 
+	void createInstance(void);
+	void createDevices(void);
+	void createCommandPools(void);
+
 public:
 	VulkanEngine(void);
 	~VulkanEngine(void);

@@ -7,7 +7,7 @@
 
 #define VERBOSE 1
 #define PRINT_FULL_DEVICE_DETAILS 1
-#define USE_MULTI_GPU 1
+#define USE_MULTI_GPU 0
 
 VulkanEngine::VulkanEngine(void)
 {
@@ -30,8 +30,13 @@ VulkanEngine::~VulkanEngine(void)
 
 void VulkanEngine::init(void)
 {
-	VkResult result;
+	createInstance();
+	createDevices();
+	createCommandPools();
+}
 
+void VulkanEngine::createInstance(void)
+{
 	// Get the Vulkan instance version
 	if (VERBOSE)
 	{
@@ -90,7 +95,10 @@ void VulkanEngine::init(void)
 
 	// Cleanup
 	if (instanceLayerProperties) delete[] instanceLayerProperties;
+}
 
+void VulkanEngine::createDevices(void)
+{
 	// Get the physical devices.
 	HANDLE_VK(vkEnumeratePhysicalDevices(instance, &numPhysicalDevices, nullptr),
 		"Querying the number of Vulkan physical devices");
@@ -150,7 +158,9 @@ void VulkanEngine::init(void)
 		}
 
 		if (VERBOSE)
-			printf("Picked %u and %u\n", graphicsQueueIndex, transferQueueIndex);
+			printf("Graphics Queue Family Index: %u\n"
+				   "Transfer Queue Family Index: %u\n",
+				graphicsQueueIndex, transferQueueIndex);
 
 		VkDeviceQueueCreateInfo deviceQueueCreateInfo[] = {
 			{ // Graphics Queue
@@ -190,7 +200,10 @@ void VulkanEngine::init(void)
 		graphicsQueueFamilyIndex.push_back(graphicsQueueIndex);
 		transferQueueFamilyIndex.push_back(transferQueueIndex);
 	}
+}
 
+void VulkanEngine::createCommandPools(void)
+{
 	// Create the command pool
 	for (uint32_t i = 0; i < devices.size(); i++)
 	{
