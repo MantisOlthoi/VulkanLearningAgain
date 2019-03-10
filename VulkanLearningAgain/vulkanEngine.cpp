@@ -2,12 +2,13 @@
 #include <stdio.h>
 #include <assert.h>
 #include <stdexcept>
+#include <sstream>
 #include "vulkanEngineInfo.h"
 #include "vulkanDebug.h"
 
-#define VERBOSE 1
-#define PRINT_FULL_DEVICE_DETAILS 1
-#define USE_MULTI_GPU 0
+// Using SDL2 to simplify cross platform displays.
+#include <SDL.h>
+#include <SDL_vulkan.h>
 
 VulkanEngine::VulkanEngine(void)
 {
@@ -15,7 +16,7 @@ VulkanEngine::VulkanEngine(void)
 
 VulkanEngine::~VulkanEngine(void)
 {
-	for (uint32_t i = 0; i < devices.size(); i++)
+	for (uint32_t i = 0; i < commandPools.size(); i++)
 		vkDestroyCommandPool(devices[i], commandPools[i], nullptr);
 	for (auto device : devices)
 	{
@@ -28,14 +29,16 @@ VulkanEngine::~VulkanEngine(void)
 	if (instance) vkDestroyInstance(instance, nullptr);
 }
 
-void VulkanEngine::init(void)
+void VulkanEngine::init(SDL_Window *sdlWindow, int screenWidth, int screenHeight)
 {
-	createInstance();
+	createInstance(sdlWindow);
 	createDevices();
+	createSurface(sdlWindow);
+	createSwapchain(static_cast<uint32_t>(screenWidth), static_cast<uint32_t>(screenHeight));
 	createCommandPools();
 }
 
-void VulkanEngine::createInstance(void)
+void VulkanEngine::createInstance(SDL_Window *sdlWindow)
 {
 	// Get the Vulkan instance version
 	if (VERBOSE)
@@ -63,7 +66,53 @@ void VulkanEngine::createInstance(void)
 	if (VERBOSE)
 		printInstanceCapabilities();
 
-	// TODO: Insert layer select code here.
+	// Ask SDL what extensions it needs.
+	unsigned int numRequiredExtensionsSDL;
+	if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &numRequiredExtensionsSDL, nullptr) == SDL_FALSE)
+	{
+		char errMsg[1024];
+		snprintf(errMsg, 1024, "Error (%s:%u): Failed to get the required Vulkan extensions count for the SDL Window : %s",
+			__FILE__, __LINE__, SDL_GetError());
+		fputs(errMsg, stderr);
+		throw std::runtime_error(errMsg);
+	}
+
+	std::vector<const char *> requiredExtensions;
+	requiredExtensions.resize(requiredExtensions.size() + numRequiredExtensionsSDL);
+	if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &numRequiredExtensionsSDL, requiredExtensions.data()) == SDL_FALSE)
+	{
+		char errMsg[1024];
+		snprintf(errMsg, 1024, "Error (%s:%u): Failed to get the required Vulkan extensions count for the SDL Window : %s",
+			__FILE__, __LINE__, SDL_GetError());
+		fputs(errMsg, stderr);
+		throw std::runtime_error(errMsg);
+	}
+
+	// Get the available instance extensions.
+	uint32_t numInstanceExtensions;
+	HANDLE_VK(vkEnumerateInstanceExtensionProperties("", &numInstanceExtensions, nullptr), "Fetching number of Vulkan instance extensions");
+	VkExtensionProperties *instanceExtensions = numInstanceExtensions ? new VkExtensionProperties[numInstanceExtensions] : nullptr;
+	HANDLE_VK(vkEnumerateInstanceExtensionProperties("", &numInstanceExtensions, instanceExtensions), "Fetching Vulkan instance extensions");
+
+	// Verify the required extensions are available.
+	for (const char *requiredExtension : requiredExtensions)
+	{
+		bool found = false;
+		for (unsigned int i = 0; i < numInstanceExtensions; i++)
+			if (strcmp(requiredExtension, instanceExtensions[i].extensionName) == 0)
+			{
+				found = true;
+				break;
+			}
+		if (!found)
+		{
+			char errMsg[1024];
+			snprintf(errMsg, 1024, "Error(%s:%u): Required Vulkan instance extension \"%s\" is not available.\n",
+				__FILE__, __LINE__, requiredExtension);
+			fputs(errMsg, stderr);
+			throw std::runtime_error(errMsg);
+		}
+	}
 
 	// Create the Vulkan instance.
 	VkApplicationInfo applicationInfo = {
@@ -76,10 +125,6 @@ void VulkanEngine::createInstance(void)
 		VK_MAKE_VERSION(1,1,0), // Vulkan API version
 	};
 
-	const char *enabledExtensionNames[] = {
-		"VK_KHR_surface",
-		"VK_KHR_win32_surface"
-	};
 	VkInstanceCreateInfo instanceCreateInfo = {
 		VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 		nullptr, // pNext - TODO: Should check out the options here.
@@ -87,11 +132,12 @@ void VulkanEngine::createInstance(void)
 		&applicationInfo,
 		0, // Number of enabled layers
 		nullptr, // Enabled layer names
-		2, // Number of enabled extensions
-		enabledExtensionNames  // Enabled extension names
+		static_cast<uint32_t>(requiredExtensions.size()), // Number of enabled extensions
+		requiredExtensions.data()  // Enabled extension names
 	};
 
 	HANDLE_VK(vkCreateInstance(&instanceCreateInfo, nullptr, &instance), "Creating Vulkan instance");
+	khrSurfaceExtEnabled = true; // SDL requires KHR_surface so we know it's enabled.
 
 	// Cleanup
 	if (instanceLayerProperties) delete[] instanceLayerProperties;
@@ -199,6 +245,11 @@ void VulkanEngine::createDevices(void)
 		devices.push_back(device);
 		graphicsQueueFamilyIndex.push_back(graphicsQueueIndex);
 		transferQueueFamilyIndex.push_back(transferQueueIndex);
+
+		// Go ahead and get the grapics queue.
+		VkQueue graphicsQueue;
+		vkGetDeviceQueue(device, graphicsQueueIndex, 0, &graphicsQueue);
+		graphicsQueues.push_back(graphicsQueue);
 	}
 }
 
@@ -219,4 +270,111 @@ void VulkanEngine::createCommandPools(void)
 
 		commandPools.push_back(commandPool);
 	}
+}
+
+void VulkanEngine::createSurface(SDL_Window *sdlWindow)
+{
+	if (SDL_Vulkan_CreateSurface(sdlWindow, instance, &surface) == SDL_FALSE)
+	{
+		fprintf(stderr, "Error (%s:%u): Failed to create Vulkan surface from SDL window : %s\n",
+			__FILE__, __LINE__, SDL_GetError());
+		throw std::runtime_error("Failed to create Vulkan surface from SDL window");
+	}
+
+	if (VERBOSE && PRINT_FULL_DEVICE_DETAILS)
+		printPhysicalSurfaceDetails(physicalDevices, numPhysicalDevices, surface);
+}
+
+void VulkanEngine::createSwapchain(uint32_t width, uint32_t height)
+{
+	//////////////////////////////////////////////////////////////////////////////
+	//
+	// Select an image format and color space to use based on what is supported.
+	//
+	//////////////////////////////////////////////////////////////////////////////
+	// Declare what we want.
+	// NOTE: We'll weight the preference for lowest index format over lowest index
+	//		 color space.
+	std::vector<VkFormat> desiredImageFormats = {
+		VK_FORMAT_B8G8R8A8_UNORM,
+		VK_FORMAT_R8G8B8A8_UNORM,
+	};
+	std::vector<VkColorSpaceKHR> desiredImageColorSpaces = {
+		VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+	};
+
+	// Get the available formats.
+	uint32_t numFormats;
+	HANDLE_VK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevices[0], surface, &numFormats, nullptr),
+		"Getting number of supported formats");
+	if (!numFormats)
+	{
+		fprintf(stderr, "Error (%s:%u): No surface formats found!\n", __FILE__, __LINE__);
+		throw std::runtime_error("Failed to find any surface formats");
+	}
+	VkSurfaceFormatKHR *formats = new VkSurfaceFormatKHR[numFormats];
+	HANDLE_VK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevices[0], surface, &numFormats, formats),
+		"Getting surface formats");
+
+	// Find the best fit format.
+	uint32_t selectedFormatIndex = ~0U;
+	uint32_t selectedColorSpaceIndex = ~0U;
+	for (uint32_t i = 0; i < numFormats; i++)
+	{
+		for (uint32_t j = 0; j < desiredImageFormats.size() && j <= selectedFormatIndex; j++)
+		{
+			if (formats[i].format == desiredImageFormats[j])
+			{
+				for (uint32_t k = 0; k < desiredImageColorSpaces.size() && k < selectedColorSpaceIndex; k++)
+				{
+					if (formats[i].colorSpace == desiredImageColorSpaces[k])
+					{
+						selectedColorSpaceIndex = k;
+						selectedFormatIndex = j;
+						break;
+					}
+				}
+			}
+		}
+	}
+	if (selectedFormatIndex == ~0U || selectedColorSpaceIndex == ~0U)
+	{
+		fprintf(stderr, "Error (%s:%u): Unable to find a suitable image format for the swap chain.\n", __FILE__, __LINE__);
+		throw std::runtime_error("Failed to find a suitable image format for the swap chain");
+	}
+
+	if (VERBOSE)
+	{
+		printf("Selected swap chain image format/colorspace: ");
+		printFormatColorSpacePair(desiredImageFormats[selectedFormatIndex],
+			desiredImageColorSpaces[selectedColorSpaceIndex]);
+		putc('\n', stdout);
+	}
+
+	//////////////////////////////////////////////////////////////////////////////
+	//
+	// Create the swapchain
+	//
+	//////////////////////////////////////////////////////////////////////////////
+	VkSwapchainCreateInfoKHR swapchainCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+		nullptr, // pNext
+		0, // flags
+		surface,
+		3, // Min # images
+		desiredImageFormats[selectedFormatIndex], // image format
+		desiredImageColorSpaces[selectedColorSpaceIndex], // image color space
+		{ width, height }, // image extent
+		1, // Number of image array layers
+		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, // Image Usage
+		VK_SHARING_MODE_EXCLUSIVE, // Sharing mode.
+		1, // Number of queue families
+		&graphicsQueueFamilyIndex[0], // Queue family indices
+		VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR, // Pre-Transform. TODO: Add checking for this.
+		VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, // Composite Alpha. TODO: Add checking for this.
+		VK_PRESENT_MODE_FIFO_KHR, // Present Mode. TODO: Add checking for this.
+		VK_FALSE, // Clipped
+		VK_NULL_HANDLE // Old Swapchain.
+	};
 }
