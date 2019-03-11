@@ -19,14 +19,21 @@ class VulkanEngine
 	std::vector<VkQueue> graphicsQueues; // One per physical device
 	std::vector<VkDevice> devices;
 	std::vector<VkCommandPool> commandPools; // One per device.
+	std::vector<VkCommandBuffer> commandBuffers; // One per swapchain image. (ignoring multi-device for now)
+	uint32_t screenWidth;
+	uint32_t screenHeight;
 	VkSurfaceKHR surface;
 	VkSwapchainKHR swapchain;
+	std::vector<VkImage> swapchainImages;
+	VkShaderModule simpleVertexShaderModule;
+	VkShaderModule simpleFragmentShaderModule;
 
 	void createInstance(SDL_Window *sdlWindow);
 	void createDevices(void);
 	void createCommandPools(void);
 	void createSurface(SDL_Window *sdlWindow);
 	void createSwapchain(uint32_t width, uint32_t height);
+	void createGraphicsPipeline(void);
 
 public:
 	VulkanEngine(void);

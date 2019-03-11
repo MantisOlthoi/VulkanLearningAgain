@@ -24,6 +24,9 @@
     <RootNamespace>VulkanLearningAgain</RootNamespace>
     <WindowsTargetPlatformVersion>10.0.16299.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
+  <PropertyGroup>
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+  </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -88,6 +91,11 @@
     <PostBuildEvent>
       <Command>copy "$(SDL2_SDK)\lib\$(PlatformTarget)\SDL2.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>if not exist "$(ProjectDir)spr-v-c" mkdir "$(ProjectDir)spr-v-c"
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleVertex.glsl" -o "$(ProjectDir)spr-v-c\simpleVertex.spv"
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -107,6 +115,11 @@
     <PostBuildEvent>
       <Command>copy "$(SDL2_SDK)\lib\$(PlatformTarget)\SDL2.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>if not exist "$(ProjectDir)spr-v-c" mkdir "$(ProjectDir)spr-v-c"
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleVertex.glsl" -o "$(ProjectDir)spr-v-c\simpleVertex.spv"
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -130,6 +143,11 @@
     <PostBuildEvent>
       <Command>copy "$(SDL2_SDK)\lib\$(PlatformTarget)\SDL2.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>if not exist "$(ProjectDir)spr-v-c" mkdir "$(ProjectDir)spr-v-c"
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleVertex.glsl" -o "$(ProjectDir)spr-v-c\simpleVertex.spv"
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -153,6 +171,11 @@
     <PostBuildEvent>
       <Command>copy "$(SDL2_SDK)\lib\$(PlatformTarget)\SDL2.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>if not exist "$(ProjectDir)spr-v-c" mkdir "$(ProjectDir)spr-v-c"
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleVertex.glsl" -o "$(ProjectDir)spr-v-c\simpleVertex.spv"
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
@@ -160,9 +183,15 @@
     <ClCompile Include="vulkanEngineInfo.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="simpleFragment.h" />
+    <ClInclude Include="simpleVertex.h" />
     <ClInclude Include="vulkanDebug.h" />
     <ClInclude Include="vulkanEngine.h" />
     <ClInclude Include="vulkanEngineInfo.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="simpleFragment.glsl" />
+    <None Include="simpleVertex.glsl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -6,6 +6,10 @@
 #include "vulkanEngineInfo.h"
 #include "vulkanDebug.h"
 
+// Include SPIR-V
+#include "simpleVertex.h"
+#include "simpleFragment.h"
+
 // Using SDL2 to simplify cross platform displays.
 #include <SDL.h>
 #include <SDL_vulkan.h>
@@ -16,6 +20,13 @@ VulkanEngine::VulkanEngine(void)
 
 VulkanEngine::~VulkanEngine(void)
 {
+	if (swapchain)
+	{
+		VkResult result = vkDeviceWaitIdle(devices[0]);
+		if (result != VK_SUCCESS)
+			fprintf(stderr, "Vulkan Error: Failed to wait for device 0 to idle : %X\n", result);
+		vkDestroySwapchainKHR(devices[0], swapchain, nullptr);
+	}
 	for (uint32_t i = 0; i < commandPools.size(); i++)
 		vkDestroyCommandPool(devices[i], commandPools[i], nullptr);
 	for (auto device : devices)
@@ -36,6 +47,7 @@ void VulkanEngine::init(SDL_Window *sdlWindow, int screenWidth, int screenHeight
 	createSurface(sdlWindow);
 	createSwapchain(static_cast<uint32_t>(screenWidth), static_cast<uint32_t>(screenHeight));
 	createCommandPools();
+	createGraphicsPipeline();
 }
 
 void VulkanEngine::createInstance(SDL_Window *sdlWindow)
@@ -145,6 +157,10 @@ void VulkanEngine::createInstance(SDL_Window *sdlWindow)
 
 void VulkanEngine::createDevices(void)
 {
+	std::vector<const char *> requiredDeviceExtensions = {
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME
+	};
+
 	// Get the physical devices.
 	HANDLE_VK(vkEnumeratePhysicalDevices(instance, &numPhysicalDevices, nullptr),
 		"Querying the number of Vulkan physical devices");
@@ -208,6 +224,41 @@ void VulkanEngine::createDevices(void)
 				   "Transfer Queue Family Index: %u\n",
 				graphicsQueueIndex, transferQueueIndex);
 
+		// Check for required extensions.
+		uint32_t numDeviceExtensions;
+		HANDLE_VK(vkEnumerateDeviceExtensionProperties(physicalDevices[i], "", &numDeviceExtensions, nullptr),
+			"Getting number of device extensions on physical device %u", i);
+		if (!numDeviceExtensions)
+		{
+			fprintf(stderr, "Error (%s:%u): Physical device %u does not have any device extensions\n", __FILE__, __LINE__, i);
+			throw std::runtime_error("Device does not have required extensions");
+		}
+		VkExtensionProperties *exts = new VkExtensionProperties[numDeviceExtensions];
+		HANDLE_VK(vkEnumerateDeviceExtensionProperties(physicalDevices[i], "", &numDeviceExtensions, exts),
+			"Getting device extensions on physical device %u", i);
+
+		for (uint32_t j = 0; j < requiredDeviceExtensions.size(); j++)
+		{
+			bool found = false;
+			for (uint32_t k = 0; k < numDeviceExtensions; k++)
+			{
+				if (strcmp(requiredDeviceExtensions[j], exts[k].extensionName) == 0)
+				{
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				fprintf(stderr, "Error (%s:%u): Failed to find required device extension \"%s\" on physical device %u",
+					__FILE__, __LINE__,
+					requiredDeviceExtensions[j],
+					i);
+				throw std::runtime_error("Device does not have required extensions");
+			}
+		}
+		
+		// Create the device
 		VkDeviceQueueCreateInfo deviceQueueCreateInfo[] = {
 			{ // Graphics Queue
 				VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -234,8 +285,8 @@ void VulkanEngine::createDevices(void)
 			deviceQueueCreateInfo,
 			0, // Number of layers to enable
 			nullptr, // Layers to enable
-			0, // Number of extensions to enable
-			nullptr, // Extensions to enable
+			static_cast<uint32_t>(requiredDeviceExtensions.size()), // Number of extensions to enable
+			requiredDeviceExtensions.data(), // Extensions to enable
 			nullptr  // Features to enable
 		};
 
@@ -270,6 +321,18 @@ void VulkanEngine::createCommandPools(void)
 
 		commandPools.push_back(commandPool);
 	}
+
+	// Create one command buffer for each swap image.
+	commandBuffers.resize(swapchainImages.size());
+	VkCommandBufferAllocateInfo commandBufferAllocInfo = {
+		VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		nullptr, // pNext
+		commandPools[0], // Command Pool
+		VK_COMMAND_BUFFER_LEVEL_PRIMARY, // Buffer level
+		static_cast<uint32_t>(swapchainImages.size()) // Num command buffers to alloc
+	};
+	HANDLE_VK(vkAllocateCommandBuffers(devices[0], &commandBufferAllocInfo, commandBuffers.data()),
+		"Allocating %zu command buffers on device 0", swapchainImages.size());
 }
 
 void VulkanEngine::createSurface(SDL_Window *sdlWindow)
@@ -377,4 +440,48 @@ void VulkanEngine::createSwapchain(uint32_t width, uint32_t height)
 		VK_FALSE, // Clipped
 		VK_NULL_HANDLE // Old Swapchain.
 	};
+
+	HANDLE_VK(vkCreateSwapchainKHR(devices[0], &swapchainCreateInfo, nullptr, &swapchain),
+		"Creating the Vulkan swapchain for device 0");
+	screenWidth = width;
+	screenHeight = height;
+
+
+	//////////////////////////////////////////////////////////////////////////////
+	//
+	// Get the swapchain images.
+	//
+	//////////////////////////////////////////////////////////////////////////////
+	uint32_t numSwapchainImages;
+	HANDLE_VK(vkGetSwapchainImagesKHR(devices[0], swapchain, &numSwapchainImages, nullptr),
+		"Getting number of swap chain images");
+	swapchainImages.resize(numSwapchainImages);
+	HANDLE_VK(vkGetSwapchainImagesKHR(devices[0], swapchain, &numSwapchainImages, swapchainImages.data()));
+}
+
+void VulkanEngine::createGraphicsPipeline(void)
+{
+	VkShaderModuleCreateInfo simpleVertexShaderCreateInfo = {
+		VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+		nullptr, // pNext
+		0, // flags
+		simpleVertexSPRVLength,
+		simpleVertexSPRV
+	};
+
+	HANDLE_VK(vkCreateShaderModule(devices[0], &simpleVertexShaderCreateInfo, nullptr, &simpleVertexShaderModule),
+		"Creating simpleVertex shader module");
+
+	VkShaderModuleCreateInfo simpleFragmentShaderCreateInfo = {
+		VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+		nullptr, // pNext
+		0, // flags
+		simpleFragmentSPRVLength,
+		simpleFragmentSPRV
+	};
+
+	HANDLE_VK(vkCreateShaderModule(devices[0], &simpleFragmentShaderCreateInfo, nullptr, &simpleFragmentShaderModule),
+		"Creating simpleFragment shader module");
+
+
 }

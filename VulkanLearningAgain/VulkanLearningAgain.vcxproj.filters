@@ -13,6 +13,12 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Shader Source Files">
+      <UniqueIdentifier>{1e2826b2-b21b-44f3-974f-652735f75c93}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Shader Header Files">
+      <UniqueIdentifier>{bc5d38fb-8b99-4290-a817-9a7f86f1e2a1}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="vulkanEngine.cpp">
@@ -35,5 +41,19 @@
     <ClInclude Include="vulkanDebug.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="simpleVertex.h">
+      <Filter>Header Files\Shader Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="simpleFragment.h">
+      <Filter>Header Files\Shader Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="simpleVertex.glsl">
+      <Filter>Shader Source Files</Filter>
+    </None>
+    <None Include="simpleFragment.glsl">
+      <Filter>Shader Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>
