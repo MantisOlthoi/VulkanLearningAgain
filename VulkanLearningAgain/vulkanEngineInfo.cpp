@@ -521,7 +521,8 @@ void printPhysicalDeviceDetails(uint32_t numPhysicalDevices, VkPhysicalDevice * 
 			putc('\n', stdout);
 
 			// Get the physical display properties
-			printPhysicalDisplayProperties(physicalDevices[i], 2);
+			// TODO: Fix this
+			//printPhysicalDisplayProperties(physicalDevices[i], 2);
 
 			// Get the physical memory details
 			printPhysicalDeviceMemoryDetails(physicalDevices[i], 2);
