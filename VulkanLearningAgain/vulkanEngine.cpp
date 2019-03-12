@@ -20,24 +20,36 @@ VulkanEngine::VulkanEngine(void)
 
 VulkanEngine::~VulkanEngine(void)
 {
-	if (swapchain)
+	// Wait for the devices to finish their work.
+	for (auto device : devices)
 	{
 		VkResult result = vkDeviceWaitIdle(devices[0]);
 		if (result != VK_SUCCESS)
 			fprintf(stderr, "Vulkan Error: Failed to wait for device 0 to idle : %X\n", result);
-		vkDestroySwapchainKHR(devices[0], swapchain, nullptr);
 	}
+
+	// Kill the render pass
+	if (simpleRenderPass)
+		vkDestroyRenderPass(devices[0], simpleRenderPass, nullptr);
+
+	// Kill the swapchain
+	if (swapchain)
+		vkDestroySwapchainKHR(devices[0], swapchain, nullptr);
+
+	// Kill the command pool
 	for (uint32_t i = 0; i < commandPools.size(); i++)
 		vkDestroyCommandPool(devices[i], commandPools[i], nullptr);
+
+	// Kill the devices
 	for (auto device : devices)
-	{
-		VkResult result = vkDeviceWaitIdle(device);
-		if (result != VK_SUCCESS)
-			fprintf(stderr, "Vulkan Error: Failed to wait for device to idle : %d\n", result);
 		vkDestroyDevice(device, nullptr);
-	}
+
+	// Cleanup the memory used for the physical devices
 	if (physicalDevices) delete[] physicalDevices;
-	if (instance) vkDestroyInstance(instance, nullptr);
+
+	// Kill the instance.
+	if (instance)
+		vkDestroyInstance(instance, nullptr);
 }
 
 void VulkanEngine::init(SDL_Window *sdlWindow, int screenWidth, int screenHeight)
@@ -440,6 +452,7 @@ void VulkanEngine::createSwapchain(uint32_t width, uint32_t height)
 		VK_FALSE, // Clipped
 		VK_NULL_HANDLE // Old Swapchain.
 	};
+	swapchainImageFormat = desiredImageFormats[selectedFormatIndex];
 
 	HANDLE_VK(vkCreateSwapchainKHR(devices[0], &swapchainCreateInfo, nullptr, &swapchain),
 		"Creating the Vulkan swapchain for device 0");
@@ -459,8 +472,79 @@ void VulkanEngine::createSwapchain(uint32_t width, uint32_t height)
 	HANDLE_VK(vkGetSwapchainImagesKHR(devices[0], swapchain, &numSwapchainImages, swapchainImages.data()));
 }
 
+void VulkanEngine::createRenderPass(void)
+{
+	VkAttachmentDescription simpleRenderPassAttachments[] = {
+		{ // Depth Buffer
+			0, // flags
+			VK_FORMAT_R32_SFLOAT, // Format
+			VK_SAMPLE_COUNT_1_BIT, // Sample count
+			VK_ATTACHMENT_LOAD_OP_DONT_CARE, // Load Op
+			VK_ATTACHMENT_STORE_OP_DONT_CARE, // Store Op
+			VK_ATTACHMENT_LOAD_OP_DONT_CARE, // Stencil Load Op
+			VK_ATTACHMENT_STORE_OP_DONT_CARE, // Stencil Store Op
+			VK_IMAGE_LAYOUT_UNDEFINED, // Initial layout
+			VK_IMAGE_LAYOUT_UNDEFINED  // Final layout
+		},
+		{ // Back Buffer
+			0, // flags
+			swapchainImageFormat, // Format
+			VK_SAMPLE_COUNT_1_BIT, // Sample count
+			VK_ATTACHMENT_LOAD_OP_DONT_CARE, // Load Op
+			VK_ATTACHMENT_STORE_OP_STORE, // Store Op
+			VK_ATTACHMENT_LOAD_OP_DONT_CARE, // Stencil Load Op
+			VK_ATTACHMENT_STORE_OP_DONT_CARE, // Stencil Store Op
+			VK_IMAGE_LAYOUT_UNDEFINED, // Initial layout
+			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR // Final layout
+		}
+	};
+
+	VkAttachmentReference depthBufferAttachmentReference = {
+		0, // Attachment index
+		VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL // Image layout
+	};
+
+	VkAttachmentReference backBufferAttachmentReference = {
+		1, // attachment index
+		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL // Image layout
+	};
+
+	VkSubpassDescription simpleRenderSubPass = {
+		0, // Flags
+		VK_PIPELINE_BIND_POINT_GRAPHICS, // Pipeline Bind Point
+		0, // Input attachment count
+		nullptr, // Input attachments
+		1, // Color attachment count
+		&backBufferAttachmentReference, // color attachments
+		nullptr, // resolve attachments (used for multisampling)
+		&depthBufferAttachmentReference, // Depth/Stencil Attachment
+		0, // Preserve attachments count
+		nullptr // Preserve attachments
+	};
+
+	VkRenderPassCreateInfo simpleRenderPassCreateInfo = {
+		VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		nullptr, // pNext
+		0, // flags
+		2, // Attachment count
+		simpleRenderPassAttachments, // Attachment descriptions
+		1, // Subpass count
+		&simpleRenderSubPass, // Subpasses
+		0, // Dependency Count
+		nullptr // Dependencies
+	};
+
+	HANDLE_VK(vkCreateRenderPass(devices[0], &simpleRenderPassCreateInfo, nullptr, &simpleRenderPass),
+		"Creating the simple render pass on device 0");
+}
+
 void VulkanEngine::createGraphicsPipeline(void)
 {
+	//////////////////////////////////////////////////////////////////////////////
+	//
+	// Create the shaders we'll use for the graphics pipeline
+	//
+	//////////////////////////////////////////////////////////////////////////////
 	VkShaderModuleCreateInfo simpleVertexShaderCreateInfo = {
 		VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
 		nullptr, // pNext
@@ -483,5 +567,173 @@ void VulkanEngine::createGraphicsPipeline(void)
 	HANDLE_VK(vkCreateShaderModule(devices[0], &simpleFragmentShaderCreateInfo, nullptr, &simpleFragmentShaderModule),
 		"Creating simpleFragment shader module");
 
+	//////////////////////////////////////////////////////////////////////////////
+	// Create the render pass.
+	//////////////////////////////////////////////////////////////////////////////
+	createRenderPass();
 
+	//////////////////////////////////////////////////////////////////////////////
+	//
+	// Create the graphics pipeline.
+	//
+	//////////////////////////////////////////////////////////////////////////////
+	VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfos[] = {
+		{ // Vertex Shader
+			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			nullptr, // pNext
+			0, // Flags
+			VK_SHADER_STAGE_VERTEX_BIT, // Stage
+			simpleVertexShaderModule, // shader module
+			"main", // Shader entry point
+			nullptr // Specialization info
+		},
+		{ // Fragment Shader
+			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			nullptr, // pNext
+			0, // Flags
+			VK_SHADER_STAGE_FRAGMENT_BIT, // Stage
+			simpleFragmentShaderModule, // Shader module
+			"main", // Shader entry point
+			nullptr // Specialization info
+		}
+	};
+
+	VkVertexInputBindingDescription vertexInputBindingDescription = {
+		0, // Binding
+		sizeof(SimpleVertex), // Stride
+		VK_VERTEX_INPUT_RATE_VERTEX // Vertex Input Rate
+	};
+
+	VkVertexInputAttributeDescription vertexAttributeDescription = {
+		0, // Location
+		0, // Binding
+		VK_FORMAT_R32G32B32_SFLOAT, // Format
+		0  // Offset
+	};
+
+	VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo = {
+		VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		nullptr, // pNext
+		0, // Flags
+		1, // Vertex Binding Description Count
+		&vertexInputBindingDescription, // Vertex Binding Descriptions
+		1, // Vertex Attribute Description Count
+		&vertexAttributeDescription, // Vertex Attribute Descriptions
+	};
+
+	VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo = {
+		VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+		nullptr, // pNext
+		0, // Flags
+		VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, // Topology
+		VK_FALSE // Primitive restart enable
+	};
+
+	VkViewport viewport = {
+		0, 0, // Starting X,Y position (top left)
+		static_cast<float>(screenWidth), // View width
+		static_cast<float>(screenHeight), // View height
+		0.0f, 1.0f // Depth Min,Max 
+	};
+
+	VkPipelineViewportStateCreateInfo viewportStateCreateInfo = {
+		VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		nullptr, // pNext
+		0, // Flags
+		1, // Viewport Count
+		&viewport, // Viewport
+		0, // Scissor Count
+		nullptr // Scissors
+	};
+
+	VkPipelineRasterizationStateCreateInfo rasterizationState = {
+		VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+		nullptr, // pNext,
+		0, // Flags
+		VK_TRUE, // Depth Clamp Enable
+		VK_FALSE, // Rasterizer Discard Enable (Turn off the Rasterizer)
+		VK_POLYGON_MODE_FILL, // Polygon Mode
+		VK_CULL_MODE_BACK_BIT, // Cull Mode
+		VK_FRONT_FACE_COUNTER_CLOCKWISE, // Front Face (Which way triangle vertices turn)
+		VK_FALSE, // Depth Bias Enable
+		0.0f, // Depth Bias constant factor
+		0.0f, // Depth Bias clamp
+		0.0f, // Depth Bias slope factor
+		1.0f // Line Width
+	};
+
+	VkPipelineDepthStencilStateCreateInfo depthStencilState = {
+		VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+		nullptr, // pNext
+		0, // Flags
+		VK_TRUE, // Depth Test Enable
+		VK_TRUE, // Depth Write Enable
+		VK_COMPARE_OP_LESS, // Depth Compare Op
+		VK_TRUE, // Depth Bounds Test Enable
+		VK_FALSE, // Stencil Test Enable
+		{ // Front Stencil Op State
+			VK_STENCIL_OP_KEEP, // Fail Op
+			VK_STENCIL_OP_KEEP, // Pass Op
+			VK_STENCIL_OP_KEEP, // Depth Fail Op
+			VK_COMPARE_OP_ALWAYS, // Compare Op
+			0U, // Compare Mask
+			0U, // Write Mask
+			0U  // Reference
+		},
+		{ // Back Stencil Op State
+			VK_STENCIL_OP_KEEP, // Fail Op
+			VK_STENCIL_OP_KEEP, // Pass Op
+			VK_STENCIL_OP_KEEP, // Depth Fail Op
+			VK_COMPARE_OP_ALWAYS, // Compare Op
+			0U, // Compare Mask
+			0U, // Write Mask
+			0U  // Reference
+		},
+		0.0f, // Min Depth Bounds
+		1.0f // Max Depth Bounds
+	};
+
+	VkPipelineColorBlendAttachmentState colorBlendAttachmentState = {
+		VK_FALSE, // Blend enable
+		VK_BLEND_FACTOR_ZERO, // Source color blend factor
+		VK_BLEND_FACTOR_ZERO, // Destination color blend factor
+		VK_BLEND_OP_ADD, // Color Blend operator
+		VK_BLEND_FACTOR_ZERO, // Source Alpha Blend factor
+		VK_BLEND_FACTOR_ZERO, // Destination alpha blend factor
+		VK_BLEND_OP_ADD, // Alhpa blend operator
+		VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT // Color Write mask
+	};
+
+	VkPipelineColorBlendStateCreateInfo colorBlendState = {
+		VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+		nullptr, // pNext
+		0, // Flags
+		VK_FALSE, // Logic Op Enable
+		VK_LOGIC_OP_COPY, // Logic Op
+		1, // Attachment count
+		&colorBlendAttachmentState, // Attachment states
+		{ 1.0f, 1.0f, 1.0f, 1.0f } // Blend Constants
+	};
+
+	VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo = {
+		VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+		nullptr, // pNext,
+		0, // flags
+		2, // Stage count
+		pipelineShaderStageCreateInfos, // Stages
+		&vertexInputStateCreateInfo, // Vertex Input State
+		&inputAssemblyStateCreateInfo, // Input Assembly State
+		nullptr, // Tessellation state
+		&viewportStateCreateInfo, // Viewport State
+		&rasterizationState, // Rasterization state
+		nullptr, // Multisample state
+		&depthStencilState, // Depth Stencil State
+		&colorBlendState, // Color Blend State
+		nullptr, // Dynamic State
+		VK_NULL_HANDLE, // Layout. TODO: Create the pipeline layout and add it here.
+		simpleRenderPass, // Render pass
+		0, // Sub-pass index
+		VK_NULL_HANDLE, // Base Pipeline Handle
+		0 // Base pipeline index
+	};
 }

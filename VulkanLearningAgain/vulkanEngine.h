@@ -25,15 +25,23 @@ class VulkanEngine
 	VkSurfaceKHR surface;
 	VkSwapchainKHR swapchain;
 	std::vector<VkImage> swapchainImages;
+	VkFormat swapchainImageFormat;
 	VkShaderModule simpleVertexShaderModule;
 	VkShaderModule simpleFragmentShaderModule;
+	VkRenderPass simpleRenderPass;
 
 	void createInstance(SDL_Window *sdlWindow);
 	void createDevices(void);
 	void createCommandPools(void);
 	void createSurface(SDL_Window *sdlWindow);
 	void createSwapchain(uint32_t width, uint32_t height);
+	void createRenderPass(void);
 	void createGraphicsPipeline(void);
+
+	struct SimpleVertex
+	{
+		float pos[3];
+	};
 
 public:
 	VulkanEngine(void);
