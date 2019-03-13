@@ -29,6 +29,11 @@ class VulkanEngine
 	VkShaderModule simpleVertexShaderModule;
 	VkShaderModule simpleFragmentShaderModule;
 	VkRenderPass simpleRenderPass;
+	VkDescriptorSetLayout simpleDescriptorSetLayout;
+	VkPipelineLayout simplePipelineLayout;
+	VkPipelineCache pipelineCache;
+	VkPipeline simpleGraphicsPipeline;
+	VkDebugUtilsMessengerEXT debugUtilsMessenger; // (added cause the driver threw nullptr expressions =) )
 
 	void createInstance(SDL_Window *sdlWindow);
 	void createDevices(void);
@@ -36,6 +41,7 @@ class VulkanEngine
 	void createSurface(SDL_Window *sdlWindow);
 	void createSwapchain(uint32_t width, uint32_t height);
 	void createRenderPass(void);
+	void createGraphicsPipelineLayout(void);
 	void createGraphicsPipeline(void);
 
 	struct SimpleVertex

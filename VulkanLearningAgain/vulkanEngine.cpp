@@ -14,6 +14,43 @@
 #include <SDL.h>
 #include <SDL_vulkan.h>
 
+typedef VkResult  (*vkCreateDebugUtilsMessengerFunc_TYPE)(
+    VkInstance                                  instance,
+    const VkDebugUtilsMessengerCreateInfoEXT*   pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkDebugUtilsMessengerEXT*                   pMessenger);
+vkCreateDebugUtilsMessengerFunc_TYPE vkCreateDebugUtilsMessengerFunc;
+
+VkBool32 debugUtilsMessengerCallbackFunc(
+	VkDebugUtilsMessageSeverityFlagBitsEXT           messageSeverity,
+	VkDebugUtilsMessageTypeFlagsEXT                  messageType,
+	const VkDebugUtilsMessengerCallbackDataEXT*      pCallbackData,
+	void*                                            pUserData)
+{
+	switch (messageSeverity)
+	{
+	case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT: printf("VERBOSE "); break;
+	case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT: printf("INFO "); break;
+	case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT: printf("WARNING "); break;
+	case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT: printf("ERROR "); break;
+	default: printf("Unknown severity ");
+	}
+
+	switch (messageType)
+	{
+	case VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT: printf(" (GENERAL)"); break;
+	case VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT: printf(" (VALIDATION)"); break;
+	case VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT: printf(" (PERFORMANCE)"); break;
+	default: printf(" (Unknown type)");
+	}
+
+	printf(": %s ", pCallbackData->pMessageIdName);
+	printf(": %d ", pCallbackData->messageIdNumber);
+	printf(": %s\n\n", pCallbackData->pMessage);
+
+	return VK_FALSE;
+}
+
 VulkanEngine::VulkanEngine(void)
 {
 }
@@ -27,6 +64,10 @@ VulkanEngine::~VulkanEngine(void)
 		if (result != VK_SUCCESS)
 			fprintf(stderr, "Vulkan Error: Failed to wait for device 0 to idle : %X\n", result);
 	}
+	
+	// Destroy the descriptor set layout
+	if (simpleDescriptorSetLayout)
+		vkDestroyDescriptorSetLayout(devices[0], simpleDescriptorSetLayout, nullptr);
 
 	// Kill the render pass
 	if (simpleRenderPass)
@@ -101,9 +142,11 @@ void VulkanEngine::createInstance(SDL_Window *sdlWindow)
 		throw std::runtime_error(errMsg);
 	}
 
-	std::vector<const char *> requiredExtensions;
+	std::vector<const char *> requiredExtensions = {
+		VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+	};
 	requiredExtensions.resize(requiredExtensions.size() + numRequiredExtensionsSDL);
-	if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &numRequiredExtensionsSDL, requiredExtensions.data()) == SDL_FALSE)
+	if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &numRequiredExtensionsSDL, &requiredExtensions.data()[1]) == SDL_FALSE)
 	{
 		char errMsg[1024];
 		snprintf(errMsg, 1024, "Error (%s:%u): Failed to get the required Vulkan extensions count for the SDL Window : %s",
@@ -162,6 +205,28 @@ void VulkanEngine::createInstance(SDL_Window *sdlWindow)
 
 	HANDLE_VK(vkCreateInstance(&instanceCreateInfo, nullptr, &instance), "Creating Vulkan instance");
 	khrSurfaceExtEnabled = true; // SDL requires KHR_surface so we know it's enabled.
+
+	// Enable debugging
+	VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCreateInfo = {
+		VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+		nullptr, // pNext
+		0, // Flags
+		VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
+			//| VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
+			| VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+			| VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+		VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+			| VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+			| VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+		debugUtilsMessengerCallbackFunc,
+		nullptr
+	};
+
+	vkCreateDebugUtilsMessengerFunc = (vkCreateDebugUtilsMessengerFunc_TYPE)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+	assert(vkCreateDebugUtilsMessengerFunc);
+
+	HANDLE_VK(vkCreateDebugUtilsMessengerFunc(instance, &debugUtilsMessengerCreateInfo, nullptr, &debugUtilsMessenger),
+		"Creating the Debug Utils Messenger. Cause let's face it... This got a lot harder than I expected...");
 
 	// Cleanup
 	if (instanceLayerProperties) delete[] instanceLayerProperties;
@@ -538,6 +603,51 @@ void VulkanEngine::createRenderPass(void)
 		"Creating the simple render pass on device 0");
 }
 
+void VulkanEngine::createGraphicsPipelineLayout(void)
+{
+	//////////////////////////////////////////////////////////////////////////////
+	//
+	// Create descriptor set layout
+	//
+	//////////////////////////////////////////////////////////////////////////////
+	VkDescriptorSetLayoutBinding uboBinding = {
+		1, // Binding
+		VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, // Descriptor Type
+		1, // Descriptor count
+		VK_SHADER_STAGE_VERTEX_BIT, // Stage flags
+		nullptr // Immuntable samplers
+	};
+
+	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {
+		VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		nullptr, // pNext
+		0, // flags
+		1, // Binding Count
+		&uboBinding
+	};
+
+	HANDLE_VK(vkCreateDescriptorSetLayout(devices[0], &descriptorSetLayoutCreateInfo, nullptr, &simpleDescriptorSetLayout),
+		"Creating descriptor set layout");
+
+	//////////////////////////////////////////////////////////////////////////////
+	//
+	// Create pipeline layout
+	//
+	//////////////////////////////////////////////////////////////////////////////
+	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {
+		VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+		nullptr, // pNext
+		0, // flags
+		1, // Set Layout Count
+		&simpleDescriptorSetLayout, // Set Layouts
+		0, // Num Push Constant Ranges
+		nullptr // Push Constant Ranges
+	};
+
+	HANDLE_VK(vkCreatePipelineLayout(devices[0], &pipelineLayoutCreateInfo, nullptr, &simplePipelineLayout),
+		"Creating pipeline layout");
+}
+
 void VulkanEngine::createGraphicsPipeline(void)
 {
 	//////////////////////////////////////////////////////////////////////////////
@@ -568,9 +678,26 @@ void VulkanEngine::createGraphicsPipeline(void)
 		"Creating simpleFragment shader module");
 
 	//////////////////////////////////////////////////////////////////////////////
-	// Create the render pass.
+	// Create the render pass and pipeline layout
 	//////////////////////////////////////////////////////////////////////////////
 	createRenderPass();
+	createGraphicsPipelineLayout();
+
+	//////////////////////////////////////////////////////////////////////////////
+	//
+	// Create the pipeline cache
+	//
+	//////////////////////////////////////////////////////////////////////////////
+	VkPipelineCacheCreateInfo pipelineCacheCreateInfo = {
+		VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
+		nullptr, // pNext
+		0, // flags
+		0, // Initial data size
+		nullptr // Initial data
+	};
+
+	HANDLE_VK(vkCreatePipelineCache(devices[0], &pipelineCacheCreateInfo, nullptr, &pipelineCache),
+		"Creating pipeline cache");
 
 	//////////////////////////////////////////////////////////////////////////////
 	//
@@ -662,6 +789,18 @@ void VulkanEngine::createGraphicsPipeline(void)
 		1.0f // Line Width
 	};
 
+	VkPipelineMultisampleStateCreateInfo multisampleState = {
+		VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+		nullptr, // pNext,
+		0, // Flags
+		VK_SAMPLE_COUNT_1_BIT, // Resterization samples (sample count)
+		VK_FALSE, // Sample Shading Enable
+		1.0f, // Min Sample Shading
+		nullptr, // Sample Mask
+		VK_FALSE, // Alpha to Coverage Enable
+		VK_FALSE, // Alpha to One Enable
+	};
+
 	VkPipelineDepthStencilStateCreateInfo depthStencilState = {
 		VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
 		nullptr, // pNext
@@ -726,14 +865,17 @@ void VulkanEngine::createGraphicsPipeline(void)
 		nullptr, // Tessellation state
 		&viewportStateCreateInfo, // Viewport State
 		&rasterizationState, // Rasterization state
-		nullptr, // Multisample state
+		&multisampleState, // Multisample state
 		&depthStencilState, // Depth Stencil State
 		&colorBlendState, // Color Blend State
 		nullptr, // Dynamic State
-		VK_NULL_HANDLE, // Layout. TODO: Create the pipeline layout and add it here.
+		simplePipelineLayout, // Layout. TODO: Create the pipeline layout and add it here.
 		simpleRenderPass, // Render pass
 		0, // Sub-pass index
 		VK_NULL_HANDLE, // Base Pipeline Handle
-		0 // Base pipeline index
+		-1 // Base pipeline index
 	};
+
+	HANDLE_VK(vkCreateGraphicsPipelines(devices[0], pipelineCache, 1, &graphicsPipelineCreateInfo, nullptr, &simpleGraphicsPipeline),
+		"Creating graphics pipeline");
 }
