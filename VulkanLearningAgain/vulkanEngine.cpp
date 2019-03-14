@@ -14,6 +14,41 @@
 #include <SDL.h>
 #include <SDL_vulkan.h>
 
+#define ENABLE_VALIDATION_LAYER 1
+
+PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerFunc;
+PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXTFunc;
+
+VkBool32 debugUtilsMessengerCallbackFunc(
+	VkDebugUtilsMessageSeverityFlagBitsEXT           messageSeverity,
+	VkDebugUtilsMessageTypeFlagsEXT                  messageType,
+	const VkDebugUtilsMessengerCallbackDataEXT*      pCallbackData,
+	void*                                            pUserData)
+{
+	switch (messageSeverity)
+	{
+	case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT: printf("VERBOSE "); break;
+	case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT: printf("INFO "); break;
+	case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT: printf("WARNING "); break;
+	case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT: printf("ERROR "); break;
+	default: printf("Unknown severity ");
+	}
+
+	switch (messageType)
+	{
+	case VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT: printf(" (GENERAL)"); break;
+	case VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT: printf(" (VALIDATION)"); break;
+	case VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT: printf(" (PERFORMANCE)"); break;
+	default: printf(" (Unknown type)");
+	}
+
+	printf(": %s ", pCallbackData->pMessageIdName);
+	printf(": %d ", pCallbackData->messageIdNumber);
+	printf(": %s\n\n", pCallbackData->pMessage);
+
+	return VK_FALSE;
+}
+
 VulkanEngine::VulkanEngine(void)
 {
 }
@@ -28,9 +63,31 @@ VulkanEngine::~VulkanEngine(void)
 			fprintf(stderr, "Vulkan Error: Failed to wait for device 0 to idle : %X\n", result);
 	}
 
+	// Destroy the graphics pipeline
+	if (simpleGraphicsPipeline)
+		vkDestroyPipeline(devices[0], simpleGraphicsPipeline, nullptr);
+
+	// Destroy the pipeline layout
+	if (simplePipelineLayout)
+		vkDestroyPipelineLayout(devices[0], simplePipelineLayout, nullptr);
+
+	// Destroy the pipeline cache
+	if (pipelineCache)
+		vkDestroyPipelineCache(devices[0], pipelineCache, nullptr);
+	
+	// Destroy the descriptor set layout
+	if (simpleDescriptorSetLayout)
+		vkDestroyDescriptorSetLayout(devices[0], simpleDescriptorSetLayout, nullptr);
+
 	// Kill the render pass
 	if (simpleRenderPass)
 		vkDestroyRenderPass(devices[0], simpleRenderPass, nullptr);
+
+	// Destroy the shader modules
+	if (simpleVertexShaderModule)
+		vkDestroyShaderModule(devices[0], simpleVertexShaderModule, nullptr);
+	if (simpleFragmentShaderModule)
+		vkDestroyShaderModule(devices[0], simpleFragmentShaderModule, nullptr);
 
 	// Kill the swapchain
 	if (swapchain)
@@ -46,6 +103,9 @@ VulkanEngine::~VulkanEngine(void)
 
 	// Cleanup the memory used for the physical devices
 	if (physicalDevices) delete[] physicalDevices;
+
+	if (debugUtilsMessenger)
+		vkDestroyDebugUtilsMessengerEXTFunc(instance, debugUtilsMessenger, nullptr);
 
 	// Kill the instance.
 	if (instance)
@@ -75,21 +135,62 @@ void VulkanEngine::createInstance(SDL_Window *sdlWindow)
 			VK_VERSION_PATCH(apiVersion));
 	}
 
-	// Get what the instance layer properties are available.
-	uint32_t numInstanceProperties;
-	HANDLE_VK(vkEnumerateInstanceLayerProperties(&numInstanceProperties, nullptr),
-		"Querying number of Vulkan instance layer properties");
-	VkLayerProperties *instanceLayerProperties = numInstanceProperties ? new VkLayerProperties[numInstanceProperties] : nullptr;
-	if (instanceLayerProperties)
-	{
-		HANDLE_VK(vkEnumerateInstanceLayerProperties(&numInstanceProperties, instanceLayerProperties),
-			"Querying Vulkan instance layer properties");
-	}
-
 	// Print the instance capabilities out to the user
 	if (VERBOSE)
 		printInstanceCapabilities();
 
+	//////////////////////////////////////////////////////////////
+	// Check for the required instances
+	//////////////////////////////////////////////////////////////
+	std::vector<const char *> requiredInstanceLayers;
+	if (ENABLE_VALIDATION_LAYER)
+		requiredInstanceLayers.push_back("VK_LAYER_LUNARG_standard_validation");
+
+	if (requiredInstanceLayers.size())
+	{
+		// Get what the instance layer properties are available.
+		uint32_t numInstanceProperties;
+		HANDLE_VK(vkEnumerateInstanceLayerProperties(&numInstanceProperties, nullptr),
+			"Querying number of Vulkan instance layer properties");
+		VkLayerProperties *instanceLayerProperties = numInstanceProperties ? new VkLayerProperties[numInstanceProperties] : nullptr;
+		if (instanceLayerProperties)
+		{
+			HANDLE_VK(vkEnumerateInstanceLayerProperties(&numInstanceProperties, instanceLayerProperties),
+				"Querying Vulkan instance layer properties");
+
+			for (const char *requiredInstanceLayer : requiredInstanceLayers)
+			{
+				bool found = false;
+				for (uint32_t i = 0; i < numInstanceProperties; i++)
+				{
+					if (strcmp(requiredInstanceLayer, instanceLayerProperties[i].layerName) == 0)
+					{
+						found = true;
+						break;
+					}
+				}
+				if (!found)
+				{
+					fprintf(stderr, "Error (%s:%u): Failed to find required instance layer \"%s\"\n",
+						__FILE__, __LINE__, requiredInstanceLayer);
+					throw std::runtime_error("Failed to find required instance layers");
+				}
+			}
+
+			// Cleanup
+			if (instanceLayerProperties) delete[] instanceLayerProperties;
+		}
+		else
+		{
+			fprintf(stderr, "ERROR (%s:%u): No instance layers found, but %zu are required.\n",
+				__FILE__, __LINE__, requiredInstanceLayers.size());
+			throw std::runtime_error("Failed to find required instance layers");
+		}
+	}
+
+	/////////////////////////////////////////////////////////////
+	// Check for required instance extensions
+	/////////////////////////////////////////////////////////////
 	// Ask SDL what extensions it needs.
 	unsigned int numRequiredExtensionsSDL;
 	if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &numRequiredExtensionsSDL, nullptr) == SDL_FALSE)
@@ -102,8 +203,11 @@ void VulkanEngine::createInstance(SDL_Window *sdlWindow)
 	}
 
 	std::vector<const char *> requiredExtensions;
+	if (ENABLE_VALIDATION_LAYER)
+		requiredExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+
 	requiredExtensions.resize(requiredExtensions.size() + numRequiredExtensionsSDL);
-	if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &numRequiredExtensionsSDL, requiredExtensions.data()) == SDL_FALSE)
+	if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &numRequiredExtensionsSDL, &requiredExtensions.data()[requiredExtensions.size() - numRequiredExtensionsSDL]) == SDL_FALSE)
 	{
 		char errMsg[1024];
 		snprintf(errMsg, 1024, "Error (%s:%u): Failed to get the required Vulkan extensions count for the SDL Window : %s",
@@ -138,7 +242,12 @@ void VulkanEngine::createInstance(SDL_Window *sdlWindow)
 		}
 	}
 
+	if (instanceExtensions)
+		delete[] instanceExtensions;
+
+	/////////////////////////////////////////////////////////////
 	// Create the Vulkan instance.
+	/////////////////////////////////////////////////////////////
 	VkApplicationInfo applicationInfo = {
 		VK_STRUCTURE_TYPE_APPLICATION_INFO,
 		nullptr, // pNext
@@ -154,8 +263,8 @@ void VulkanEngine::createInstance(SDL_Window *sdlWindow)
 		nullptr, // pNext - TODO: Should check out the options here.
 		0, // flags - reserved for future use.
 		&applicationInfo,
-		0, // Number of enabled layers
-		nullptr, // Enabled layer names
+		static_cast<uint32_t>(requiredInstanceLayers.size()), // Number of enabled layers
+		requiredInstanceLayers.data(), // Enabled layer names
 		static_cast<uint32_t>(requiredExtensions.size()), // Number of enabled extensions
 		requiredExtensions.data()  // Enabled extension names
 	};
@@ -163,12 +272,40 @@ void VulkanEngine::createInstance(SDL_Window *sdlWindow)
 	HANDLE_VK(vkCreateInstance(&instanceCreateInfo, nullptr, &instance), "Creating Vulkan instance");
 	khrSurfaceExtEnabled = true; // SDL requires KHR_surface so we know it's enabled.
 
-	// Cleanup
-	if (instanceLayerProperties) delete[] instanceLayerProperties;
+	// Enable debugging
+	if (ENABLE_VALIDATION_LAYER)
+	{
+		VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCreateInfo = {
+			VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+			nullptr, // pNext
+			0, // Flags
+			VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
+				// | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
+				| VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+				| VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+			VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+				| VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+				| VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+			debugUtilsMessengerCallbackFunc,
+			nullptr
+		};
+
+		vkCreateDebugUtilsMessengerFunc = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+		assert(vkCreateDebugUtilsMessengerFunc);
+
+		vkDestroyDebugUtilsMessengerEXTFunc = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+
+		HANDLE_VK(vkCreateDebugUtilsMessengerFunc(instance, &debugUtilsMessengerCreateInfo, nullptr, &debugUtilsMessenger),
+			"Creating the Debug Utils Messenger. Cause let's face it... This got a lot harder than I expected...");
+	}
 }
 
 void VulkanEngine::createDevices(void)
 {
+	std::vector<const char *> requiredDeviceLayers;
+	if (ENABLE_VALIDATION_LAYER)
+		requiredDeviceLayers.push_back("VK_LAYER_LUNARG_standard_validation");
+
 	std::vector<const char *> requiredDeviceExtensions = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME
 	};
@@ -236,6 +373,46 @@ void VulkanEngine::createDevices(void)
 				   "Transfer Queue Family Index: %u\n",
 				graphicsQueueIndex, transferQueueIndex);
 
+		// Check for required layers.
+		if (requiredDeviceLayers.size())
+		{
+			uint32_t numLayers;
+			HANDLE_VK(vkEnumerateDeviceLayerProperties(physicalDevices[i], &numLayers, nullptr),
+				"Getting number of device layers on physical device %u", i);
+			if (!numLayers)
+			{
+				fprintf(stderr, "Error (%s:%u): No device layers found, but there are %zu required layers\n",
+					__FILE__, __LINE__, requiredDeviceLayers.size());
+				throw std::runtime_error("Failed to find required device layers");
+			}
+			VkLayerProperties *layers = new VkLayerProperties[numLayers];
+			if (layers)
+			{
+				HANDLE_VK(vkEnumerateDeviceLayerProperties(physicalDevices[i], &numLayers, layers),
+					"Getting device layers on physical device %u", i);
+				for (const char *requiredLayer : requiredDeviceLayers)
+				{
+					bool found = false;
+					for (uint32_t j = 0; j < numLayers; j++)
+					{
+						if (strcmp(requiredLayer, layers[j].layerName) == 0)
+						{
+							found = true;
+							break;
+						}
+					}
+					if (!found)
+					{
+						fprintf(stderr, "Error (%s:%u): Failed to find required layer \"%s\"\n",
+							__FILE__, __LINE__, requiredLayer);
+						throw std::runtime_error("Failed to find required device layers");
+					}
+				}
+
+				delete[] layers;
+			}
+		}
+
 		// Check for required extensions.
 		uint32_t numDeviceExtensions;
 		HANDLE_VK(vkEnumerateDeviceExtensionProperties(physicalDevices[i], "", &numDeviceExtensions, nullptr),
@@ -269,8 +446,12 @@ void VulkanEngine::createDevices(void)
 				throw std::runtime_error("Device does not have required extensions");
 			}
 		}
+
+		if (exts)
+			delete[] exts;
 		
 		// Create the device
+		float queuePriorities[] = { 1.0f };
 		VkDeviceQueueCreateInfo deviceQueueCreateInfo[] = {
 			{ // Graphics Queue
 				VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -278,7 +459,7 @@ void VulkanEngine::createDevices(void)
 				0, // Flags
 				graphicsQueueIndex, // Queue Family Index
 				1, // Number of queues to make
-				nullptr // Queue priorities
+				queuePriorities // Queue priorities
 			},
 			{ // Transfer queue
 				VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -286,7 +467,7 @@ void VulkanEngine::createDevices(void)
 				0, // Flags
 				transferQueueIndex, // Queue Family Index
 				1, // Number of queues to make
-				nullptr // Queue priorities
+				queuePriorities // Queue priorities
 			}
 		};
 		VkDeviceCreateInfo deviceCreateInfo = {
@@ -295,8 +476,8 @@ void VulkanEngine::createDevices(void)
 			0, // Flags, reserved for future use.
 			USE_MULTI_GPU && graphicsQueueIndex != transferQueueIndex ? 2U : 1U, // Number of queue families to create.
 			deviceQueueCreateInfo,
-			0, // Number of layers to enable
-			nullptr, // Layers to enable
+			static_cast<uint32_t>(requiredDeviceLayers.size()), // Number of layers to enable
+			requiredDeviceLayers.data(), // Layers to enable
 			static_cast<uint32_t>(requiredDeviceExtensions.size()), // Number of extensions to enable
 			requiredDeviceExtensions.data(), // Extensions to enable
 			nullptr  // Features to enable
@@ -431,6 +612,15 @@ void VulkanEngine::createSwapchain(uint32_t width, uint32_t height)
 	// Create the swapchain
 	//
 	//////////////////////////////////////////////////////////////////////////////
+	VkBool32 surfaceSupported = VK_FALSE;
+	HANDLE_VK(vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevices[0], graphicsQueueFamilyIndex[0], surface, &surfaceSupported),
+		"Getting device surface support");
+	if (surfaceSupported == VK_FALSE)
+	{
+		fprintf(stderr, "Error (%s:%u): Physical device 0 does NOT support presenting to the given surface\n", __FILE__, __LINE__);
+		throw std::runtime_error("Physical devices 0 does not support presenting to the SDL surface");
+	}
+
 	VkSwapchainCreateInfoKHR swapchainCreateInfo =
 	{
 		VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -484,7 +674,7 @@ void VulkanEngine::createRenderPass(void)
 			VK_ATTACHMENT_LOAD_OP_DONT_CARE, // Stencil Load Op
 			VK_ATTACHMENT_STORE_OP_DONT_CARE, // Stencil Store Op
 			VK_IMAGE_LAYOUT_UNDEFINED, // Initial layout
-			VK_IMAGE_LAYOUT_UNDEFINED  // Final layout
+			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL  // Final layout
 		},
 		{ // Back Buffer
 			0, // flags
@@ -523,7 +713,7 @@ void VulkanEngine::createRenderPass(void)
 	};
 
 	VkRenderPassCreateInfo simpleRenderPassCreateInfo = {
-		VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
 		nullptr, // pNext
 		0, // flags
 		2, // Attachment count
@@ -536,6 +726,51 @@ void VulkanEngine::createRenderPass(void)
 
 	HANDLE_VK(vkCreateRenderPass(devices[0], &simpleRenderPassCreateInfo, nullptr, &simpleRenderPass),
 		"Creating the simple render pass on device 0");
+}
+
+void VulkanEngine::createGraphicsPipelineLayout(void)
+{
+	//////////////////////////////////////////////////////////////////////////////
+	//
+	// Create descriptor set layout
+	//
+	//////////////////////////////////////////////////////////////////////////////
+	VkDescriptorSetLayoutBinding uboBinding = {
+		1, // Binding
+		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // Descriptor Type
+		1, // Descriptor count
+		VK_SHADER_STAGE_VERTEX_BIT, // Stage flags
+		nullptr // Immuntable samplers
+	};
+
+	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {
+		VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		nullptr, // pNext
+		0, // flags
+		1, // Binding Count
+		&uboBinding
+	};
+
+	HANDLE_VK(vkCreateDescriptorSetLayout(devices[0], &descriptorSetLayoutCreateInfo, nullptr, &simpleDescriptorSetLayout),
+		"Creating descriptor set layout");
+
+	//////////////////////////////////////////////////////////////////////////////
+	//
+	// Create pipeline layout
+	//
+	//////////////////////////////////////////////////////////////////////////////
+	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {
+		VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+		nullptr, // pNext
+		0, // flags
+		1, // Set Layout Count
+		&simpleDescriptorSetLayout, // Set Layouts
+		0, // Num Push Constant Ranges
+		nullptr // Push Constant Ranges
+	};
+
+	HANDLE_VK(vkCreatePipelineLayout(devices[0], &pipelineLayoutCreateInfo, nullptr, &simplePipelineLayout),
+		"Creating pipeline layout");
 }
 
 void VulkanEngine::createGraphicsPipeline(void)
@@ -568,9 +803,26 @@ void VulkanEngine::createGraphicsPipeline(void)
 		"Creating simpleFragment shader module");
 
 	//////////////////////////////////////////////////////////////////////////////
-	// Create the render pass.
+	// Create the render pass and pipeline layout
 	//////////////////////////////////////////////////////////////////////////////
 	createRenderPass();
+	createGraphicsPipelineLayout();
+
+	//////////////////////////////////////////////////////////////////////////////
+	//
+	// Create the pipeline cache
+	//
+	//////////////////////////////////////////////////////////////////////////////
+	VkPipelineCacheCreateInfo pipelineCacheCreateInfo = {
+		VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
+		nullptr, // pNext
+		0, // flags
+		0, // Initial data size
+		nullptr // Initial data
+	};
+
+	HANDLE_VK(vkCreatePipelineCache(devices[0], &pipelineCacheCreateInfo, nullptr, &pipelineCache),
+		"Creating pipeline cache");
 
 	//////////////////////////////////////////////////////////////////////////////
 	//
@@ -636,21 +888,28 @@ void VulkanEngine::createGraphicsPipeline(void)
 		0.0f, 1.0f // Depth Min,Max 
 	};
 
+	VkRect2D scissor = {
+		{ 0, 0 }, // offset
+		{ 1, 1 }  // extent
+	};
+
 	VkPipelineViewportStateCreateInfo viewportStateCreateInfo = {
 		VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
 		nullptr, // pNext
 		0, // Flags
 		1, // Viewport Count
 		&viewport, // Viewport
-		0, // Scissor Count
-		nullptr // Scissors
+		1,
+		&scissor
+		//0, // Scissor Count
+		//nullptr // Scissors
 	};
 
 	VkPipelineRasterizationStateCreateInfo rasterizationState = {
 		VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 		nullptr, // pNext,
 		0, // Flags
-		VK_TRUE, // Depth Clamp Enable
+		VK_FALSE, // Depth Clamp Enable
 		VK_FALSE, // Rasterizer Discard Enable (Turn off the Rasterizer)
 		VK_POLYGON_MODE_FILL, // Polygon Mode
 		VK_CULL_MODE_BACK_BIT, // Cull Mode
@@ -662,6 +921,18 @@ void VulkanEngine::createGraphicsPipeline(void)
 		1.0f // Line Width
 	};
 
+	VkPipelineMultisampleStateCreateInfo multisampleState = {
+		VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+		nullptr, // pNext,
+		0, // Flags
+		VK_SAMPLE_COUNT_1_BIT, // Resterization samples (sample count)
+		VK_FALSE, // Sample Shading Enable
+		1.0f, // Min Sample Shading
+		nullptr, // Sample Mask
+		VK_FALSE, // Alpha to Coverage Enable
+		VK_FALSE, // Alpha to One Enable
+	};
+
 	VkPipelineDepthStencilStateCreateInfo depthStencilState = {
 		VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
 		nullptr, // pNext
@@ -669,7 +940,7 @@ void VulkanEngine::createGraphicsPipeline(void)
 		VK_TRUE, // Depth Test Enable
 		VK_TRUE, // Depth Write Enable
 		VK_COMPARE_OP_LESS, // Depth Compare Op
-		VK_TRUE, // Depth Bounds Test Enable
+		VK_FALSE, // Depth Bounds Test Enable
 		VK_FALSE, // Stencil Test Enable
 		{ // Front Stencil Op State
 			VK_STENCIL_OP_KEEP, // Fail Op
@@ -726,14 +997,17 @@ void VulkanEngine::createGraphicsPipeline(void)
 		nullptr, // Tessellation state
 		&viewportStateCreateInfo, // Viewport State
 		&rasterizationState, // Rasterization state
-		nullptr, // Multisample state
+		&multisampleState, // Multisample state
 		&depthStencilState, // Depth Stencil State
 		&colorBlendState, // Color Blend State
 		nullptr, // Dynamic State
-		VK_NULL_HANDLE, // Layout. TODO: Create the pipeline layout and add it here.
+		simplePipelineLayout, // Layout. TODO: Create the pipeline layout and add it here.
 		simpleRenderPass, // Render pass
 		0, // Sub-pass index
 		VK_NULL_HANDLE, // Base Pipeline Handle
 		0 // Base pipeline index
 	};
+
+	HANDLE_VK(vkCreateGraphicsPipelines(devices[0], pipelineCache, 1, &graphicsPipelineCreateInfo, nullptr, &simpleGraphicsPipeline),
+		"Creating graphics pipeline");
 }
