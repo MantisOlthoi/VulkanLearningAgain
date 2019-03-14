@@ -94,7 +94,7 @@
     <PreBuildEvent>
       <Command>if not exist "$(ProjectDir)spr-v-c" mkdir "$(ProjectDir)spr-v-c"
 "$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleVertex.glsl" -o "$(ProjectDir)spr-v-c\simpleVertex.spv"
-"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=fragment -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -118,7 +118,7 @@
     <PreBuildEvent>
       <Command>if not exist "$(ProjectDir)spr-v-c" mkdir "$(ProjectDir)spr-v-c"
 "$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleVertex.glsl" -o "$(ProjectDir)spr-v-c\simpleVertex.spv"
-"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=fragment -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -146,7 +146,7 @@
     <PreBuildEvent>
       <Command>if not exist "$(ProjectDir)spr-v-c" mkdir "$(ProjectDir)spr-v-c"
 "$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleVertex.glsl" -o "$(ProjectDir)spr-v-c\simpleVertex.spv"
-"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=fragment -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -174,7 +174,7 @@
     <PreBuildEvent>
       <Command>if not exist "$(ProjectDir)spr-v-c" mkdir "$(ProjectDir)spr-v-c"
 "$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleVertex.glsl" -o "$(ProjectDir)spr-v-c\simpleVertex.spv"
-"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=vertex -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
+"$(Vulkan_SDK)\bin\glslc.exe" -fshader-stage=fragment -mfmt=c "$(ProjectDir)simpleFragment.glsl" -o "$(ProjectDir)spr-v-c\simpleFragment.spv"</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
