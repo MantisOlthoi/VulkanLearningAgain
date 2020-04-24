@@ -9,6 +9,8 @@
 #include <SDL.h>
 #include <SDL_vulkan.h>
 
+void handleEvent(SDL_Event &sdlEvent, VulkanEngine &engine, bool &isDone);
+
 int main(void)
 {
 	bool sdlInited = false;
@@ -48,8 +50,24 @@ int main(void)
 		auto startTime = std::chrono::high_resolution_clock::now();
 		engine.init(sdlWindow, screenWidth, screenHeight);
 		auto endTime = std::chrono::high_resolution_clock::now();
-
 		printf("Time to initialize engine: %lf seconds\n", std::chrono::duration<double>(endTime - startTime).count());
+
+		engine.loadGeometry();
+
+		// Main loop
+		bool done = false;
+		while (!done)
+		{
+			// Handle Events
+			SDL_Event sdlEvent;
+			if (SDL_PollEvent(&sdlEvent))
+				handleEvent(sdlEvent, engine, done);
+
+			if (done)
+				break;
+
+			engine.render();
+		}
 	}
 	catch (std::exception &e)
 	{
@@ -60,7 +78,13 @@ int main(void)
 		return 1;
 	}
 
-	system("pause");
-
 	return 0;
+}
+
+void handleEvent(SDL_Event &sdlEvent, VulkanEngine &engine, bool &isDone)
+{
+	switch (sdlEvent.type)
+	{
+	case SDL_QUIT: isDone = true; break;
+	}
 }

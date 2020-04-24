@@ -9,8 +9,8 @@
 	VkResult vulkanResultVar = vulkanExpression; \
 	if (vulkanResultVar != VK_SUCCESS) { \
 		const char *errStr = "Unknown"; \
-		char usrMsg[1024]; \
-		char msg[1024]; \
+		char *usrMsg = new char[1024]; \
+		char *msg = new char[1024]; \
 		snprintf(usrMsg, 1024, "" __VA_ARGS__); \
 		switch(vulkanResultVar) { \
 			case VK_SUCCESS: errStr = "VK_SUCCESS"; break; \
@@ -46,4 +46,4 @@
 		fprintf(stderr, "%s", msg); \
 		throw std::runtime_error(msg); \
 	} \
-}
+};

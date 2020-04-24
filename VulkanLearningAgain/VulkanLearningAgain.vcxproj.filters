@@ -30,6 +30,9 @@
     <ClCompile Include="vulkanEngineInfo.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="graphicsMath.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="vulkanEngine.h">
@@ -46,6 +49,9 @@
     </ClInclude>
     <ClInclude Include="simpleFragment.h">
       <Filter>Header Files\Shader Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="graphicsMath.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
